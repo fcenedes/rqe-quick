@@ -26,11 +26,34 @@ High-performance Redis RediSearch benchmarking tool with optimized parallel oper
 
 ---
 
+## Prerequisites
+
+This project uses **[uv](https://github.com/astral-sh/uv)** for fast, reliable Python package management.
+
+### Install uv (if not already installed)
+
+```bash
+# macOS/Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# Or with pip
+pip install uv
+```
+
+---
+
 ## Quick Start
 
 ### 1. Install Dependencies
 
 ```bash
+# Using uv (recommended)
+uv pip install -r requirements.txt
+
+# Or using pip
 pip install -r requirements.txt
 ```
 
@@ -327,6 +350,12 @@ chmod 600 .env
 ### "ModuleNotFoundError: No module named 'dotenv'"
 
 ```bash
+# Using uv
+uv pip install python-dotenv
+# or
+uv pip install -r requirements.txt
+
+# Using pip
 pip install python-dotenv
 # or
 pip install -r requirements.txt
