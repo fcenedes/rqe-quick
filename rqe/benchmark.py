@@ -124,7 +124,7 @@ class BenchmarkRunner:
                     schema=self.schema,
                     n_docs=self.n_docs,
                     chunk=Config.SEED_BATCH_SIZE,
-                    seed=42
+                    seed=Config.RANDOM_SEED
                 )
             elif approach == "threaded":
                 seed_from_schema_threaded(
@@ -132,7 +132,7 @@ class BenchmarkRunner:
                     schema=self.schema,
                     n_docs=self.n_docs,
                     chunk=Config.SEED_BATCH_SIZE,
-                    seed=42,
+                    seed=Config.RANDOM_SEED,
                     concurrency=Config.PARALLEL_WORKERS,
                     connection_pool=self.connection_pool
                 )
@@ -152,7 +152,7 @@ class BenchmarkRunner:
                         schema=self.schema,
                         n_docs=self.n_docs,
                         chunk=Config.SEED_BATCH_SIZE,
-                        seed=42,
+                        seed=Config.RANDOM_SEED,
                         concurrency=Config.PARALLEL_WORKERS
                     )
 

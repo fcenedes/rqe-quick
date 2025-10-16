@@ -24,6 +24,9 @@ class Config:
     CONNECTION_POOL_SIZE = int(os.getenv("CONNECTION_POOL_SIZE") or PARALLEL_WORKERS)
     SEED_BATCH_SIZE = int(os.getenv("SEED_BATCH_SIZE", "20000"))
     AGGREGATE_BATCH_SIZE = int(os.getenv("AGGREGATE_BATCH_SIZE", "20000"))
+
+    # Data generation settings
+    RANDOM_SEED = int(os.getenv("RANDOM_SEED", "42"))
     
     @classmethod
     def get_redis_params(cls):
@@ -51,5 +54,6 @@ class Config:
             "Connection Pool Size": cls.CONNECTION_POOL_SIZE,
             "Seed Batch Size": f"{cls.SEED_BATCH_SIZE:,}",
             "Aggregate Batch Size": f"{cls.AGGREGATE_BATCH_SIZE:,}",
+            "Random Seed": cls.RANDOM_SEED,
         }
 

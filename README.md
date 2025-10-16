@@ -436,6 +436,18 @@ All configuration is managed via the `.env` file:
 | `SEED_BATCH_SIZE` | Pipeline batch size for seeding | `20000` | `50000` for local, `30000` for remote |
 | `AGGREGATE_BATCH_SIZE` | Cursor batch size for aggregation | `20000` | `50000` for local, `30000` for remote |
 
+### Data Generation Settings
+
+| Variable | Description | Default | Notes |
+|----------|-------------|---------|-------|
+| `RANDOM_SEED` | Random seed for data generation | `42` | Same seed = same data (reproducible benchmarks). Change to generate different data. |
+
+**Why RANDOM_SEED matters:**
+- **Reproducibility**: Same seed generates identical data across runs
+- **Consistency**: Compare performance changes without data variance
+- **Testing**: Verify index behavior with known data patterns
+- **Different Data**: Change seed (e.g., `43`, `100`, `999`) to test with different distributions
+
 ---
 
 ## 🎯 Performance Tuning
