@@ -25,6 +25,9 @@ class Config:
     SEED_BATCH_SIZE = int(os.getenv("SEED_BATCH_SIZE", "20000"))
     AGGREGATE_BATCH_SIZE = int(os.getenv("AGGREGATE_BATCH_SIZE", "20000"))
 
+    # Aggregation settings
+    TOPK_DEPTH = int(os.getenv("TOPK_DEPTH", "10"))
+
     # Data generation settings
     RANDOM_SEED = int(os.getenv("RANDOM_SEED", "42"))
     
@@ -54,6 +57,7 @@ class Config:
             "Connection Pool Size": cls.CONNECTION_POOL_SIZE,
             "Seed Batch Size": f"{cls.SEED_BATCH_SIZE:,}",
             "Aggregate Batch Size": f"{cls.AGGREGATE_BATCH_SIZE:,}",
+            "Top-K Depth": cls.TOPK_DEPTH,
             "Random Seed": cls.RANDOM_SEED,
         }
 

@@ -71,6 +71,48 @@ def display_schema(schema):
     console.print(fields_table)
 
 
+def display_aggregation_details(results, n_docs=None):
+    """Display detailed aggregation results with validation."""
+    console.print()
+    console.print(Panel.fit(
+        "[bold yellow]📊 Aggregation Details & Validation[/bold yellow]",
+        border_style="yellow"
+    ))
+
+    for result in results:
+        if not result.success or not result.metadata or "aggregation_results" not in result.metadata:
+            continue
+
+        counts = result.metadata["aggregation_results"]
+        test_type = result.name.replace("aggregation_", "")
+
+        console.print(f"\n[bold cyan]{test_type.upper()} - {result.approach}[/bold cyan] ({result.elapsed_time:.3f}s)")
+
+        for field, rows in counts.items():
+            # Create table for this field
+            table = Table(title=f"Field: {field}", box=box.SIMPLE, show_header=True)
+            table.add_column("Value", style="cyan", no_wrap=True)
+            table.add_column("Count", justify="right", style="yellow")
+
+            total_count = 0
+            for value, count in rows:
+                table.add_row(str(value), f"{count:,}")
+                total_count += count
+
+            console.print(table)
+
+            # Validation
+            if n_docs:
+                if total_count == n_docs:
+                    console.print(f"[green]✓ Validation: {total_count:,} = {n_docs:,} docs (100%)[/green]")
+                else:
+                    percentage = (total_count / n_docs) * 100
+                    console.print(f"[yellow]⚠ Validation: {total_count:,} / {n_docs:,} docs ({percentage:.1f}%)[/yellow]")
+            else:
+                console.print(f"[white]Total groups: {len(rows):,}, Total count: {total_count:,}[/white]")
+            console.print()
+
+
 def display_results(results, baseline_approach="naive", n_docs=None):
     """Display benchmark results in beautiful tables."""
     # Group results by test name
@@ -205,7 +247,19 @@ def display_results(results, baseline_approach="naive", n_docs=None):
     is_flag=True,
     help="Quiet mode (minimal output)"
 )
-def main(schema, approach, test, docs, quiet):
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Verbose mode (show aggregation details and validation)"
+)
+@click.option(
+    "--keep-data",
+    "-k",
+    is_flag=True,
+    help="Keep existing data (don't recreate index, reuse if exists)"
+)
+def main(schema, approach, test, docs, quiet, verbose, keep_data):
     """
     🚀 Redis RediSearch Performance Benchmark Tool
 
@@ -299,6 +353,12 @@ def main(schema, approach, test, docs, quiet):
         if not quiet:
             console.print()
             display_results(runner.results, n_docs=docs)
+
+            # Verbose mode: show aggregation details
+            if verbose:
+                agg_results = [r for r in runner.results if r.name.startswith("aggregation_")]
+                if agg_results:
+                    display_aggregation_details(agg_results, n_docs=docs)
         else:
             # Quiet mode: just print times
             for r in runner.results:

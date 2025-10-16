@@ -39,6 +39,7 @@ class BenchmarkResult:
     elapsed_time: float
     success: bool
     error: Optional[str] = None
+    metadata: Optional[Dict] = None
 
 
 class BenchmarkRunner:
@@ -198,25 +199,25 @@ class BenchmarkRunner:
     ) -> BenchmarkResult:
         """
         Run aggregation benchmark.
-        
+
         Args:
             test_type: "topk" or "cursor"
             approach: "naive", "threaded", or "async"
             progress_callback: Optional callback for progress updates
-            
+
         Returns:
-            BenchmarkResult
+            BenchmarkResult with aggregation_results in metadata
         """
         try:
             if test_type == "topk":
-                topn = 10
+                topn = Config.TOPK_DEPTH
                 batch_size = None
             else:  # cursor
                 topn = None
                 batch_size = Config.AGGREGATE_BATCH_SIZE
-            
+
             if approach == "naive":
-                _, elapsed = count_by_fields_resp3_naive(
+                counts, elapsed = count_by_fields_resp3_naive(
                     self.redis_client,
                     self.index,
                     query="*",
@@ -227,7 +228,7 @@ class BenchmarkRunner:
                     timeout_ms=20_000
                 )
             elif approach == "threaded":
-                _, elapsed = count_by_fields_resp3_threaded(
+                counts, elapsed = count_by_fields_resp3_threaded(
                     self.redis_client,
                     self.index,
                     query="*",
@@ -252,7 +253,7 @@ class BenchmarkRunner:
                 async def run_async():
                     r_async = aioredis.Redis(**Config.get_redis_params())
                     try:
-                        _, elapsed = await count_by_fields_resp3_async(
+                        counts, elapsed = await count_by_fields_resp3_async(
                             r_async,
                             self.index,
                             query="*",
@@ -263,19 +264,20 @@ class BenchmarkRunner:
                             timeout_ms=20_000,
                             concurrency=Config.PARALLEL_WORKERS
                         )
-                        return elapsed
+                        return counts, elapsed
                     finally:
                         await r_async.aclose()
-                
-                elapsed = asyncio.run(run_async())
+
+                counts, elapsed = asyncio.run(run_async())
             else:
                 raise ValueError(f"Unknown approach: {approach}")
-            
+
             result = BenchmarkResult(
                 name=f"aggregation_{test_type}",
                 approach=approach,
                 elapsed_time=elapsed,
-                success=True
+                success=True,
+                metadata={"aggregation_results": counts}
             )
             self.results.append(result)
             return result
