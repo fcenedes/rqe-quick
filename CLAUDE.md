@@ -294,7 +294,10 @@ python main.py
 
 ### "ModuleNotFoundError: No module named 'dotenv'"
 ```bash
+# User uses uv as package manager
 uv pip install python-dotenv
+# or
+uv pip install -r requirements.txt
 ```
 
 ### Configuration not loading
