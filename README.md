@@ -268,9 +268,9 @@ uv run python -m rqe.cli --approach naive
 uv run python -m rqe.cli --approach threaded
 uv run python -m rqe.cli --approach async
 
-# Run multiple approaches (compare them)
-uv run python -m rqe.cli --approach naive,threaded
-uv run python -m rqe.cli --approach threaded,async
+# Run multiple approaches (compare them) - repeat the flag
+uv run python -m rqe.cli -a naive -a threaded
+uv run python -m rqe.cli -a threaded -a async
 uv run python -m rqe.cli --approach all  # All three approaches
 
 # Run specific test
@@ -278,13 +278,13 @@ uv run python -m rqe.cli --test seeding
 uv run python -m rqe.cli --test topk
 uv run python -m rqe.cli --test cursor
 
-# Run multiple tests
-uv run python -m rqe.cli --test seeding,topk
+# Run multiple tests - repeat the flag
+uv run python -m rqe.cli -t seeding -t topk
 uv run python -m rqe.cli --test all  # All three tests
 
 # Combine options
-uv run python -m rqe.cli -s schemas/user.yaml -a threaded,async -t seeding
-uv run python -m rqe.cli -a async -t topk,cursor -n 50000
+uv run python -m rqe.cli -s schemas/user.yaml -a threaded -a async -t seeding
+uv run python -m rqe.cli -a async -t topk -t cursor -n 50000
 
 # Custom document count
 uv run python -m rqe.cli --docs 50000
@@ -309,7 +309,7 @@ uv run python -m rqe.cli -q
 
 ```bash
 # Compare threaded vs async for seeding with user schema
-uv run python -m rqe.cli -s schemas/user.yaml -a threaded,async -t seeding -n 50000
+uv run python -m rqe.cli -s schemas/user.yaml -a threaded -a async -t seeding -n 50000
 
 # Quick test with 1000 docs (default ecommerce schema)
 uv run python -m rqe.cli -n 1000
@@ -452,6 +452,27 @@ All configuration is managed via the `.env` file:
 
 ## 🎯 Performance Tuning
 
+### Understanding Batch Size vs Network MTU
+
+**Key Insight**: Each HSET command for the ecommerce schema is ~210 bytes.
+
+**Network Layer**:
+- MTU (Ethernet): 1,500 bytes
+- TCP payload: 1,460 bytes (after IP/TCP headers)
+- Commands per packet: ~6 (1,260 bytes)
+
+**Batch Size Impact**:
+| Batch Size | Total Bytes | TCP Packets | Efficiency | Memory |
+|------------|-------------|-------------|------------|--------|
+| 1,000 | 210 KB | 144 | 97.2% | ~0.2 MB |
+| 2,000 | 420 KB | 288 | 97.2% | ~0.4 MB |
+| 5,000 | 1.05 MB | 720 | 97.2% | ~1.0 MB |
+| 10,000 | 2.1 MB | 1,439 | 97.3% | ~2.0 MB |
+
+**Recommendation**: Batch sizes above 1,000 achieve >97% TCP efficiency. Choose based on latency tolerance and memory.
+
+---
+
 ### For Single Redis Instance (Local)
 
 ```bash
@@ -462,29 +483,46 @@ SEED_BATCH_SIZE=50000
 AGGREGATE_BATCH_SIZE=50000
 ```
 
-**Why?** Redis is single-threaded, so the real performance gain comes from larger batch sizes, not parallelism.
+**Why?**
+- Redis is single-threaded, so parallelism has minimal benefit
+- Real performance gain comes from larger batch sizes
+- Local latency is <1ms, so large batches don't hurt
 
 **Expected Results**:
 - Async: 20-30% faster than threaded
 - Threaded: 5-10% faster than naive
 - Batch size increase: 5-10x speedup
 
-### For Redis Cloud (Remote)
+---
+
+### For Redis Cloud (Remote) - **YOUR SETUP**
 
 ```bash
 # .env
 PARALLEL_WORKERS=4
 CONNECTION_POOL_SIZE=4
-SEED_BATCH_SIZE=30000
-AGGREGATE_BATCH_SIZE=30000
+SEED_BATCH_SIZE=10000
+AGGREGATE_BATCH_SIZE=5000
 ```
 
-**Why?** Parallel connections help hide network latency, and moderate batch sizes balance memory usage.
+**Why?**
+- Network latency: 10-50ms (vs <1ms local)
+- Larger batches hide latency better
+- 10K batch = 2.1 MB = good balance
+- 97.3% TCP efficiency
+- Parallel connections help with remote Redis
+
+**Current vs Recommended**:
+- Current: `SEED_BATCH_SIZE=2000` (420 KB, 288 packets)
+- Recommended: `SEED_BATCH_SIZE=10000` (2.1 MB, 1,439 packets)
+- **5x larger batches = better latency hiding**
 
 **Expected Results**:
 - Async: 30-50% faster than threaded
 - Threaded: 10-20% faster than naive
 - Network latency hiding is key
+
+---
 
 ### For Redis Cluster (Multiple Shards)
 
@@ -496,7 +534,10 @@ SEED_BATCH_SIZE=20000
 AGGREGATE_BATCH_SIZE=20000
 ```
 
-**Why?** Parallelism actually helps with multiple Redis instances/shards!
+**Why?**
+- Parallelism actually helps with multiple Redis instances/shards!
+- Each worker can target different shards
+- True parallel execution
 
 **Expected Results**:
 - Async: 2-3x faster than threaded
@@ -931,8 +972,14 @@ uv run python -m rqe.cli
 # Quick test with custom schema
 uv run python -m rqe.cli -s schemas/user.yaml -n 10000
 
-# Compare async vs threaded
-uv run python -m rqe.cli -a async,threaded
+# Compare specific approaches (repeat the flag for multiple)
+uv run python -m rqe.cli -a threaded -a async
+
+# Run specific tests (repeat the flag for multiple)
+uv run python -m rqe.cli -t topk -t cursor
+
+# Combine multiple approaches and tests
+uv run python -m rqe.cli -a threaded -a async -t topk -t cursor
 
 # Test seeding only with custom schema
 uv run python -m rqe.cli -s schemas/my-schema.yaml -t seeding
@@ -942,6 +989,25 @@ uv run python -m rqe.cli -q > results.txt
 
 # Help
 uv run python -m rqe.cli --help
+```
+
+### CLI Options
+
+| Option | Short | Values | Default | Description |
+|--------|-------|--------|---------|-------------|
+| `--schema` | `-s` | Path to YAML | `schemas/ecommerce.yaml` | Schema file to use |
+| `--approach` | `-a` | `naive`, `threaded`, `async`, `all` | `all` | Approach(es) to benchmark |
+| `--test` | `-t` | `seeding`, `topk`, `cursor`, `all` | `all` | Test(s) to run |
+| `--docs` | `-n` | Integer | `500000` | Number of documents to seed |
+| `--quiet` | `-q` | Flag | `false` | Quiet mode (CSV output) |
+
+**Important**: For multiple values, **repeat the flag**:
+```bash
+# ✅ CORRECT
+-a threaded -a async -t topk -t cursor
+
+# ❌ WRONG (doesn't work)
+-a threaded,async -t topk,cursor
 ```
 
 ### Performance Expectations

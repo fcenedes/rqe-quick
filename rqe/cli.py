@@ -24,7 +24,7 @@ from .schema import load_schema
 console = Console()
 
 
-def display_config():
+def display_config(n_docs=None):
     """Display configuration in a beautiful table."""
     table = Table(title="Configuration", box=box.ROUNDED, show_header=True, header_style="bold cyan")
     table.add_column("Setting", style="cyan", no_wrap=True)
@@ -33,6 +33,10 @@ def display_config():
     config_data = Config.display()
     for key, value in config_data.items():
         table.add_row(key, str(value))
+
+    # Add number of documents if provided
+    if n_docs is not None:
+        table.add_row("Documents to Generate", f"{n_docs:,}", style="bold magenta")
 
     # Add uvloop status
     uvloop_status = "✓ Available" if BENCH_UVLOOP_AVAILABLE else "✗ Not installed"
@@ -67,7 +71,7 @@ def display_schema(schema):
     console.print(fields_table)
 
 
-def display_results(results, baseline_approach="naive"):
+def display_results(results, baseline_approach="naive", n_docs=None):
     """Display benchmark results in beautiful tables."""
     # Group results by test name
     by_test = {}
@@ -75,7 +79,7 @@ def display_results(results, baseline_approach="naive"):
         if r.name not in by_test:
             by_test[r.name] = {}
         by_test[r.name][r.approach] = r
-    
+
     # Results table
     table = Table(title="📊 Benchmark Results", box=box.DOUBLE, show_header=True, header_style="bold magenta")
     table.add_column("Test", style="cyan", no_wrap=True)
@@ -83,17 +87,17 @@ def display_results(results, baseline_approach="naive"):
     table.add_column("Threaded", justify="right", style="yellow")
     table.add_column("Async", justify="right", style="green")
     table.add_column("Best", justify="center", style="bold green")
-    
+
     for test_name, approaches in by_test.items():
         naive_time = approaches.get("naive")
         threaded_time = approaches.get("threaded")
         async_time = approaches.get("async")
-        
+
         # Format times
         naive_str = f"{naive_time.elapsed_time:.2f}s" if naive_time and naive_time.success else "N/A"
         threaded_str = f"{threaded_time.elapsed_time:.2f}s" if threaded_time and threaded_time.success else "N/A"
         async_str = f"{async_time.elapsed_time:.2f}s" if async_time and async_time.success else "N/A"
-        
+
         # Find best
         times = []
         if naive_time and naive_time.success:
@@ -102,16 +106,37 @@ def display_results(results, baseline_approach="naive"):
             times.append(("Threaded", threaded_time.elapsed_time))
         if async_time and async_time.success:
             times.append(("Async", async_time.elapsed_time))
-        
+
         best = min(times, key=lambda x: x[1])[0] if times else "N/A"
         best_str = f"🏆 {best}"
-        
+
         # Pretty test name
         test_display = test_name.replace("_", " ").title()
-        
+
         table.add_row(test_display, naive_str, threaded_str, async_str, best_str)
-    
+
     console.print(table)
+
+    # Operations per second table (only for seeding)
+    if n_docs and "seeding" in by_test:
+        ops_table = Table(title="⚡ Operations per Second", box=box.ROUNDED, show_header=True, header_style="bold yellow")
+        ops_table.add_column("Test", style="cyan", no_wrap=True)
+        ops_table.add_column("Naive", justify="right", style="white")
+        ops_table.add_column("Threaded", justify="right", style="yellow")
+        ops_table.add_column("Async", justify="right", style="green")
+
+        seeding_approaches = by_test["seeding"]
+        naive_time = seeding_approaches.get("naive")
+        threaded_time = seeding_approaches.get("threaded")
+        async_time = seeding_approaches.get("async")
+
+        # Calculate ops/sec
+        naive_ops = f"{n_docs / naive_time.elapsed_time:,.0f} docs/sec" if naive_time and naive_time.success and naive_time.elapsed_time > 0 else "N/A"
+        threaded_ops = f"{n_docs / threaded_time.elapsed_time:,.0f} docs/sec" if threaded_time and threaded_time.success and threaded_time.elapsed_time > 0 else "N/A"
+        async_ops = f"{n_docs / async_time.elapsed_time:,.0f} docs/sec" if async_time and async_time.success and async_time.elapsed_time > 0 else "N/A"
+
+        ops_table.add_row("Seeding", naive_ops, threaded_ops, async_ops)
+        console.print(ops_table)
     
     # Speedup table
     speedup_table = Table(title="⚡ Speedup vs Naive", box=box.ROUNDED, show_header=True, header_style="bold yellow")
@@ -157,7 +182,7 @@ def display_results(results, baseline_approach="naive"):
     multiple=True,
     type=click.Choice(["naive", "threaded", "async", "all"], case_sensitive=False),
     default=["all"],
-    help="Which approach(es) to benchmark (default: all)"
+    help="Which approach(es) to benchmark (default: all). Repeat for multiple: -a threaded -a async"
 )
 @click.option(
     "--test",
@@ -165,14 +190,14 @@ def display_results(results, baseline_approach="naive"):
     multiple=True,
     type=click.Choice(["seeding", "topk", "cursor", "all"], case_sensitive=False),
     default=["all"],
-    help="Which test(s) to run (default: all)"
+    help="Which test(s) to run (default: all). Repeat for multiple: -t topk -t cursor"
 )
 @click.option(
     "--docs",
     "-n",
     type=int,
-    default=2_000_000,
-    help="Number of documents to seed (default: 2,000,000)"
+    default=500_000,
+    help="Number of documents to seed (default: 500,000)"
 )
 @click.option(
     "--quiet",
@@ -212,7 +237,7 @@ def main(schema, approach, test, docs, quiet):
             border_style="cyan"
         ))
         console.print()
-        display_config()
+        display_config(n_docs=docs)
         console.print()
         display_schema(schema_obj)
         console.print()
@@ -273,7 +298,7 @@ def main(schema, approach, test, docs, quiet):
         # Display results
         if not quiet:
             console.print()
-            display_results(runner.results)
+            display_results(runner.results, n_docs=docs)
         else:
             # Quiet mode: just print times
             for r in runner.results:
