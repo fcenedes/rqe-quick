@@ -50,16 +50,17 @@ pip install uv
 ### 1. Install Dependencies
 
 ```bash
-# Using uv (recommended)
-uv pip install -r requirements.txt
+# Using uv (recommended - uses pyproject.toml)
+uv sync
 
-# Or using pip
+# Or using pip with requirements.txt
 pip install -r requirements.txt
 ```
 
-**Requirements**:
-- `redis>=5.0.0` - Redis client for Python
-- `python-dotenv>=1.0.0` - Environment variable management
+**Dependencies** (defined in `pyproject.toml`):
+- `redis>=6.4.0` - Redis client for Python
+- `dotenv>=0.9.9` - Environment variable management (python-dotenv)
+- `hiredis>=3.3.0` - High-performance Redis protocol parser
 
 ### 2. Configure Redis Connection
 
@@ -88,22 +89,14 @@ REDIS_USERNAME=default
 REDIS_PASSWORD=your-password-here
 ```
 
-### 3. Test Configuration
+### 3. Run Benchmark
 
 ```bash
-# Verify configuration and connection
-python test_config.py
-```
-
-### 4. Run Benchmark
-
-```bash
-# Full performance comparison
+# Run the performance comparison
 python main.py
-
-# Quick functionality test
-python test_quick.py
 ```
+
+The script will display your configuration and run benchmarks comparing original vs optimized functions.
 
 ---
 
@@ -130,7 +123,7 @@ All configuration is managed via the `.env` file:
 | `SEED_BATCH_SIZE` | Pipeline batch size for seeding | `20000` | `50000` for local, `30000` for remote |
 | `AGGREGATE_BATCH_SIZE` | Cursor batch size for aggregation | `20000` | `50000` for local, `30000` for remote |
 
-See [`ENV_SETUP.md`](ENV_SETUP.md) for detailed configuration guide.
+All configuration is managed through the `.env` file.
 
 ---
 
@@ -172,7 +165,7 @@ AGGREGATE_BATCH_SIZE=20000
 
 **Why?** Parallelism actually helps with multiple Redis instances/shards!
 
-See [`WHEN_PARALLELISM_HELPS.md`](WHEN_PARALLELISM_HELPS.md) for detailed analysis.
+**Key insight**: For single Redis instances, focus on batch size over parallelism.
 
 ---
 
@@ -181,22 +174,16 @@ See [`WHEN_PARALLELISM_HELPS.md`](WHEN_PARALLELISM_HELPS.md) for detailed analys
 ```
 .
 ├── main.py                          # Main benchmark script
-├── test_config.py                   # Test configuration loading
-├── test_quick.py                    # Quick functionality test
-├── requirements.txt                 # Python dependencies
+├── pyproject.toml                   # Project metadata and dependencies (uv)
+├── uv.lock                          # Locked dependencies (uv)
+├── requirements.txt                 # Python dependencies (pip fallback)
 │
 ├── .env                             # Your configuration (NOT committed)
 ├── .env.sample                      # Configuration template (committed)
 ├── .gitignore                       # Protects .env from being committed
 │
 ├── README.md                        # This file
-├── ENV_SETUP.md                     # Environment setup guide
-├── CONFIGURATION.md                 # Performance tuning guide
-├── WHEN_PARALLELISM_HELPS.md        # When to use parallelism
-├── REDIS_CLOUD_SETUP.md             # Redis Cloud connection guide
-├── ARCHITECTURE_IMPROVEMENTS.md     # Architecture documentation
-├── OPTIMIZATION_SUMMARY.md          # Optimization details
-└── config_examples.py               # Configuration examples
+└── CLAUDE.md                        # Notes for Claude AI assistant
 ```
 
 ---
@@ -335,37 +322,27 @@ chmod 600 .env
 
 ---
 
-## Documentation
-
-- **[ENV_SETUP.md](ENV_SETUP.md)** - Complete environment setup guide
-- **[CONFIGURATION.md](CONFIGURATION.md)** - Performance tuning guide
-- **[WHEN_PARALLELISM_HELPS.md](WHEN_PARALLELISM_HELPS.md)** - When to use parallelism
-- **[REDIS_CLOUD_SETUP.md](REDIS_CLOUD_SETUP.md)** - Redis Cloud connection guide
-- **[ARCHITECTURE_IMPROVEMENTS.md](ARCHITECTURE_IMPROVEMENTS.md)** - Architecture details
-
----
-
 ## Troubleshooting
 
 ### "ModuleNotFoundError: No module named 'dotenv'"
 
 ```bash
-# Using uv
-uv pip install python-dotenv
-# or
-uv pip install -r requirements.txt
+# Using uv (recommended)
+uv sync
 
-# Using pip
+# Or using pip
 pip install python-dotenv
-# or
-pip install -r requirements.txt
 ```
 
 ### "Connection refused"
 
 Check your Redis connection settings in `.env`:
 ```bash
-python test_config.py
+# Verify your settings
+cat .env
+
+# Test connection
+python -c "from main import REDIS_HOST, REDIS_PORT; print(f'{REDIS_HOST}:{REDIS_PORT}')"
 ```
 
 ### "Authentication failed"
@@ -384,7 +361,7 @@ PARALLEL_WORKERS=2
 SEED_BATCH_SIZE=50000
 ```
 
-See [WHEN_PARALLELISM_HELPS.md](WHEN_PARALLELISM_HELPS.md) for details.
+Redis is single-threaded, so batch size matters more than parallelism.
 
 ---
 
@@ -407,7 +384,7 @@ Contributions welcome! Please ensure:
 ## Support
 
 For issues or questions:
-1. Check the documentation in the `*.md` files
-2. Run `python test_config.py` to verify setup
-3. Review [WHEN_PARALLELISM_HELPS.md](WHEN_PARALLELISM_HELPS.md) for performance tuning
+1. Check the README.md for configuration and troubleshooting
+2. Verify your `.env` file settings
+3. Test with: `python main.py`
 

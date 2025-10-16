@@ -51,6 +51,7 @@ AGGREGATE_BATCH_SIZE=50000
 - **Port**: `11127`
 - **Auth**: Username/password authentication
 - **Package Manager**: `uv` (not pip)
+- **Dependencies**: Managed via `pyproject.toml` and `uv.lock`
 
 ---
 
@@ -175,17 +176,18 @@ SEED_BATCH_SIZE=30000
 
 ### Core Files
 - `main.py` - Main script with all functions
+- `pyproject.toml` - Project metadata and dependencies (uv)
+- `uv.lock` - Locked dependencies (uv)
+- `requirements.txt` - Python dependencies (pip fallback)
 - `.env` - User's configuration (NOT committed)
 - `.env.sample` - Configuration template (committed)
 - `.gitignore` - Protects `.env`
-- `requirements.txt` - Python dependencies
 
-### Documentation (User Removed Most)
-- `README.md` - Main documentation
-- Other `.md` files were removed by user
-
-### This File
+### Documentation
+- `README.md` - Main documentation (consolidated)
 - `CLAUDE.md` - Notes for Claude (this file)
+
+**Note**: User removed all other `.md` files and test files (`test_config.py`, `test_quick.py`, etc.) to keep the project minimal.
 
 ---
 
@@ -278,15 +280,17 @@ def my_function_fast(..., n_workers=4, connection_pool=None):
 
 ## Testing
 
-### Quick Test
+### Quick Config Test
 ```bash
-python -c "from main import REDIS_HOST; print(f'Config loaded: {REDIS_HOST}')"
+python -c "from main import REDIS_HOST, REDIS_PORT; print(f'Config loaded: {REDIS_HOST}:{REDIS_PORT}')"
 ```
 
-### Full Test
+### Full Benchmark
 ```bash
 python main.py
 ```
+
+**Note**: User removed `test_config.py` and `test_quick.py` - only `main.py` remains.
 
 ---
 
@@ -295,9 +299,7 @@ python main.py
 ### "ModuleNotFoundError: No module named 'dotenv'"
 ```bash
 # User uses uv as package manager
-uv pip install python-dotenv
-# or
-uv pip install -r requirements.txt
+uv sync
 ```
 
 ### Configuration not loading
