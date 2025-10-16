@@ -1,5 +1,5 @@
 """
-Benchmark runner for Redis RediSearch performance tests.
+Schema-driven benchmark runner for Redis RediSearch performance tests.
 """
 
 import asyncio
@@ -17,11 +17,12 @@ except ImportError:
 
 from .config import Config
 from .connection import RedisConnectionPool
-from .index import ensure_index_hash, wait_until_indexed
+from .index import create_index_from_schema, validate_index_schema, wait_until_indexed
+from .schema import load_schema, BenchmarkSchema
 from .seeding import (
-    seed_dummy_hash_docs_naive,
-    seed_dummy_hash_docs_threaded,
-    seed_dummy_hash_docs_async
+    seed_from_schema_naive,
+    seed_from_schema_threaded,
+    seed_from_schema_async
 )
 from .aggregation import (
     count_by_fields_resp3_naive,
@@ -41,32 +42,39 @@ class BenchmarkResult:
 
 
 class BenchmarkRunner:
-    """Runs benchmarks for different approaches."""
-    
+    """Schema-driven benchmark runner for different approaches."""
+
     def __init__(
         self,
-        index: str = "idx:orders",
-        prefix: str = "order:",
-        n_docs: int = 200_000,
-        fields: List[str] = None
+        schema: BenchmarkSchema = None,
+        schema_path: str = "schemas/ecommerce.yaml",
+        n_docs: int = 200_000
     ):
         """
         Initialize benchmark runner.
-        
+
         Args:
-            index: Index name
-            prefix: Key prefix for documents
+            schema: BenchmarkSchema object (if None, loads from schema_path)
+            schema_path: Path to schema YAML file (default: schemas/ecommerce.yaml)
             n_docs: Number of documents to seed
-            fields: Fields to aggregate (default: country, category, status)
         """
-        self.index = index
-        self.prefix = prefix
+        # Load schema
+        if schema is None:
+            self.schema = load_schema(schema_path)
+        else:
+            self.schema = schema
+
+        self.schema_path = schema_path
         self.n_docs = n_docs
-        self.fields = fields or ["country", "category", "status"]
-        
+
+        # Extract info from schema
+        self.index = self.schema.index.name
+        self.prefix = self.schema.index.prefix
+        self.fields = self.schema.get_aggregation_fields()
+
         # Create Redis client
         self.redis_client = redis.Redis(**Config.get_redis_params())
-        
+
         # Create connection pool for threaded operations
         self.connection_pool = RedisConnectionPool(
             host=Config.REDIS_HOST,
@@ -76,57 +84,56 @@ class BenchmarkRunner:
             password=Config.REDIS_PASSWORD,
             pool_size=Config.CONNECTION_POOL_SIZE
         )
-        
+
         self.results: List[BenchmarkResult] = []
-    
+
     def setup_index(self, recreate: bool = True) -> str:
         """
-        Setup the index.
-        
+        Setup the index from schema.
+
         Args:
             recreate: Whether to recreate the index
-            
+
         Returns:
             Index state ("created", "reused", "recreated")
         """
-        if_exists = "recreate_if_mismatch" if recreate else "reuse"
-        return ensure_index_hash(
+        if_exists = "drop" if recreate else "reuse"
+        return create_index_from_schema(
             self.redis_client,
-            index=self.index,
-            prefix=self.prefix,
+            schema=self.schema,
             if_exists=if_exists
         )
     
     def run_seeding(self, approach: str = "naive", progress_callback=None) -> BenchmarkResult:
         """
-        Run seeding benchmark.
-        
+        Run schema-driven seeding benchmark.
+
         Args:
             approach: "naive", "threaded", or "async"
             progress_callback: Optional callback for progress updates
-            
+
         Returns:
             BenchmarkResult
         """
         try:
             t0 = perf_counter()
-            
+
             if approach == "naive":
-                seed_dummy_hash_docs_naive(
+                seed_from_schema_naive(
                     self.redis_client,
-                    prefix=self.prefix,
+                    schema=self.schema,
                     n_docs=self.n_docs,
                     chunk=Config.SEED_BATCH_SIZE,
-                    seed=7
+                    seed=42
                 )
             elif approach == "threaded":
-                seed_dummy_hash_docs_threaded(
+                seed_from_schema_threaded(
                     self.redis_client,
-                    prefix=self.prefix,
+                    schema=self.schema,
                     n_docs=self.n_docs,
                     chunk=Config.SEED_BATCH_SIZE,
-                    seed=7,
-                    n_workers=Config.PARALLEL_WORKERS,
+                    seed=42,
+                    concurrency=Config.PARALLEL_WORKERS,
                     connection_pool=self.connection_pool
                 )
             elif approach == "async":
@@ -138,21 +145,17 @@ class BenchmarkRunner:
                         success=False,
                         error="uvloop not available"
                     )
-                
+
                 async def run_async():
-                    r_async = aioredis.Redis(**Config.get_redis_params())
-                    try:
-                        await seed_dummy_hash_docs_async(
-                            r_async,
-                            prefix=self.prefix,
-                            n_docs=self.n_docs,
-                            chunk=Config.SEED_BATCH_SIZE,
-                            seed=7,
-                            concurrency=Config.PARALLEL_WORKERS
-                        )
-                    finally:
-                        await r_async.aclose()
-                
+                    await seed_from_schema_async(
+                        self.redis_client,
+                        schema=self.schema,
+                        n_docs=self.n_docs,
+                        chunk=Config.SEED_BATCH_SIZE,
+                        seed=42,
+                        concurrency=Config.PARALLEL_WORKERS
+                    )
+
                 asyncio.run(run_async())
             else:
                 raise ValueError(f"Unknown approach: {approach}")

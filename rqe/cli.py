@@ -19,6 +19,7 @@ except ImportError:
 
 from .config import Config
 from .benchmark import BenchmarkRunner, UVLOOP_AVAILABLE as BENCH_UVLOOP_AVAILABLE
+from .schema import load_schema
 
 console = Console()
 
@@ -28,16 +29,42 @@ def display_config():
     table = Table(title="Configuration", box=box.ROUNDED, show_header=True, header_style="bold cyan")
     table.add_column("Setting", style="cyan", no_wrap=True)
     table.add_column("Value", style="white")
-    
+
     config_data = Config.display()
     for key, value in config_data.items():
         table.add_row(key, str(value))
-    
+
     # Add uvloop status
     uvloop_status = "✓ Available" if BENCH_UVLOOP_AVAILABLE else "✗ Not installed"
     table.add_row("uvloop", uvloop_status, style="green" if BENCH_UVLOOP_AVAILABLE else "yellow")
-    
+
     console.print(table)
+
+
+def display_schema(schema):
+    """Display schema information in a beautiful table."""
+    table = Table(title="📋 Schema", box=box.ROUNDED, show_header=True, header_style="bold cyan")
+    table.add_column("Property", style="cyan", no_wrap=True)
+    table.add_column("Value", style="white")
+
+    table.add_row("Index Name", schema.index.name)
+    table.add_row("Prefix", schema.index.prefix)
+    table.add_row("Storage Type", schema.index.storage_type.upper())
+    table.add_row("Fields", str(len(schema.fields)))
+    table.add_row("Aggregation Fields", ", ".join(schema.get_aggregation_fields()))
+
+    console.print(table)
+
+    # Fields table
+    fields_table = Table(title="🔧 Fields", box=box.ROUNDED, show_header=True, header_style="bold magenta")
+    fields_table.add_column("Name", style="cyan", no_wrap=True)
+    fields_table.add_column("Type", style="yellow")
+    fields_table.add_column("Generator", style="green")
+
+    for field in schema.fields:
+        fields_table.add_row(field.name, field.type.upper(), field.generator or "(default)")
+
+    console.print(fields_table)
 
 
 def display_results(results, baseline_approach="naive"):
@@ -118,6 +145,13 @@ def display_results(results, baseline_approach="naive"):
 
 @click.command()
 @click.option(
+    "--schema",
+    "-s",
+    type=click.Path(exists=True),
+    default="schemas/ecommerce.yaml",
+    help="Path to schema YAML file (default: schemas/ecommerce.yaml)"
+)
+@click.option(
     "--approach",
     "-a",
     multiple=True,
@@ -141,29 +175,17 @@ def display_results(results, baseline_approach="naive"):
     help="Number of documents to seed (default: 200,000)"
 )
 @click.option(
-    "--index",
-    type=str,
-    default="idx:orders",
-    help="Index name (default: idx:orders)"
-)
-@click.option(
-    "--prefix",
-    type=str,
-    default="order:",
-    help="Key prefix (default: order:)"
-)
-@click.option(
     "--quiet",
     "-q",
     is_flag=True,
     help="Quiet mode (minimal output)"
 )
-def main(approach, test, docs, index, prefix, quiet):
+def main(schema, approach, test, docs, quiet):
     """
     🚀 Redis RediSearch Performance Benchmark Tool
-    
-    Compare performance of naive, threaded, and async implementations
-    for seeding and aggregation operations.
+
+    Schema-driven benchmarking for seeding and aggregation operations.
+    Compare performance of naive, threaded, and async implementations.
     """
     # Normalize inputs
     approaches = list(approach)
@@ -171,11 +193,18 @@ def main(approach, test, docs, index, prefix, quiet):
         approaches = ["naive", "threaded"]
         if BENCH_UVLOOP_AVAILABLE:
             approaches.append("async")
-    
+
     tests = list(test)
     if "all" in tests:
         tests = ["seeding", "topk", "cursor"]
-    
+
+    # Load schema
+    try:
+        schema_obj = load_schema(schema)
+    except Exception as e:
+        console.print(f"[red]✗ Failed to load schema: {e}[/red]")
+        return
+
     # Display header
     if not quiet:
         console.print(Panel.fit(
@@ -185,9 +214,11 @@ def main(approach, test, docs, index, prefix, quiet):
         console.print()
         display_config()
         console.print()
-    
+        display_schema(schema_obj)
+        console.print()
+
     # Create benchmark runner
-    runner = BenchmarkRunner(index=index, prefix=prefix, n_docs=docs)
+    runner = BenchmarkRunner(schema=schema_obj, schema_path=schema, n_docs=docs)
     
     try:
         # Setup index

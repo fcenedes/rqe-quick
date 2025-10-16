@@ -1,0 +1,50 @@
+version: '0.1.0'
+
+index:
+  name: ecommerce-idx
+  prefix: 'product:'
+  storage_type: 'hash'
+
+fields:
+  - name: country
+    type: tag
+    generator: random.choice
+    generator_args:
+      choices: ["US", "FR", "DE", "IN", "BR", "CN", "GB", "ES", "IT", "JP"]
+  
+  - name: category
+    type: tag
+    generator: random.choice
+    generator_args:
+      choices: ["electronics", "books", "toys", "clothing", "grocery", "beauty", "sports"]
+  
+  - name: status
+    type: tag
+    generator: random.weighted_choice
+    generator_args:
+      choices: ["pending", "paid", "shipped", "delivered", "returned", "cancelled"]
+      weights: [4, 10, 15, 25, 3, 2]
+  
+  - name: price
+    type: numeric
+    generator: random.gauss
+    generator_args:
+      mu: 60
+      sigma: 25
+      min: 1
+      max: 500
+  
+  - name: ts
+    type: numeric
+    generator: random.timestamp
+    generator_args:
+      days_ago: 30
+
+aggregations:
+  - field: country
+    enabled: true
+  - field: category
+    enabled: true
+  - field: status
+    enabled: true
+

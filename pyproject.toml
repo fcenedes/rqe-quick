@@ -10,4 +10,7 @@ dependencies = [
     "uvloop>=0.19.0",
     "click>=8.1.0",
     "rich>=13.0.0",
+    "pydantic>=2.12.2",
+    "pyyaml>=6.0.3",
+    "faker>=37.11.0",
 ]

@@ -1,8 +1,15 @@
 # Redis RediSearch Performance Benchmark
 
-High-performance Redis RediSearch benchmarking tool with beautiful CLI, multiple implementation approaches (naive, threaded, async), and comprehensive performance comparisons.
+**Schema-driven** Redis RediSearch benchmarking tool with beautiful CLI, realistic data generation, and comprehensive performance comparisons across multiple implementation approaches.
 
 ## ✨ Features
+
+✅ **Schema-Driven Architecture**
+- **YAML Schema Definition**: Define your index structure in simple YAML files
+- **Automatic Data Generation**: Realistic data using Faker and random generators
+- **Multiple Storage Types**: Support for both HASH and JSON storage
+- **All Field Types**: TAG, TEXT, NUMERIC, VECTOR, GEO fields
+- **No Hardcoded Logic**: Everything driven by schema configuration
 
 ✅ **Multiple Implementation Approaches**
 - **Naive**: Sequential baseline implementation
@@ -11,6 +18,7 @@ High-performance Redis RediSearch benchmarking tool with beautiful CLI, multiple
 
 ✅ **Beautiful CLI Interface**
 - Rich terminal output with tables and colors
+- Schema visualization with field types and generators
 - Animated progress bars with spinners
 - Flexible command-line options
 - Compare any combination of approaches
@@ -30,6 +38,7 @@ High-performance Redis RediSearch benchmarking tool with beautiful CLI, multiple
 - Secure credential management
 - Connection pooling with lazy initialization
 - Proper resource cleanup
+- Pydantic schema validation
 
 ---
 
@@ -65,12 +74,14 @@ pip install -r requirements.txt
 ```
 
 **Dependencies**:
-- `redis>=6.4.0` - Redis client for Python
-- `dotenv>=0.9.9` - Environment variable management
-- `hiredis>=3.3.0` - High-performance Redis protocol parser
+- `redis>=5.0.0` - Redis client for Python
+- `python-dotenv>=1.0.0` - Environment variable management
 - `uvloop>=0.19.0` - Fast asyncio event loop
 - `click>=8.1.0` - CLI framework
 - `rich>=13.0.0` - Beautiful terminal output
+- `pydantic>=2.0.0` - Schema validation
+- `pyyaml>=6.0.0` - YAML parsing
+- `faker>=20.0.0` - Realistic data generation
 
 ### 2. Configure Redis Connection
 
@@ -102,12 +113,138 @@ REDIS_PASSWORD=your-password-here
 ### 3. Run Benchmark
 
 ```bash
-# Run all benchmarks with all approaches (default)
-python main.py
+# Run all benchmarks with default schema (ecommerce)
+uv run python -m rqe.cli
 
 # Quick test with fewer documents
-python main.py --docs 10000
+uv run python -m rqe.cli -n 10000
+
+# Use custom schema
+uv run python -m rqe.cli -s schemas/user.yaml -n 5000
 ```
+
+---
+
+## 📐 Schema Definition
+
+### What is a Schema?
+
+A schema defines your RediSearch index structure, field types, and data generators in a simple YAML file. This allows you to benchmark any index structure without writing code!
+
+### Example Schema (E-commerce)
+
+```yaml
+version: '0.1.0'
+
+index:
+  name: ecommerce-idx
+  prefix: 'product:'
+  storage_type: 'hash'  # or 'json'
+
+fields:
+  - name: country
+    type: tag
+    generator: random.choice
+    generator_args:
+      choices: ["US", "FR", "DE", "IN", "BR", "CN", "GB", "ES", "IT", "JP"]
+
+  - name: category
+    type: tag
+    generator: random.choice
+    generator_args:
+      choices: ["electronics", "books", "toys", "clothing", "grocery", "beauty", "sports"]
+
+  - name: status
+    type: tag
+    generator: random.weighted_choice
+    generator_args:
+      choices: ["pending", "paid", "shipped", "delivered", "returned", "cancelled"]
+      weights: [4, 10, 15, 25, 3, 2]
+
+  - name: price
+    type: numeric
+    attrs:
+      sortable: true
+    generator: random.gauss
+    generator_args:
+      mu: 60.0
+      sigma: 25.0
+      min: 1.0
+      max: 500.0
+
+  - name: ts
+    type: numeric
+    attrs:
+      sortable: true
+    generator: random.timestamp
+    generator_args:
+      days_ago: 30
+
+aggregations:
+  - field: country
+  - field: category
+  - field: status
+```
+
+### Available Generators
+
+**Random Generators:**
+- `random.choice` - Random choice from list
+- `random.weighted_choice` - Weighted random choice
+- `random.randint` - Random integer in range
+- `random.randfloat` - Random float in range
+- `random.gauss` - Gaussian distribution
+- `random.timestamp` - Random timestamps
+- `random.bool` - Random boolean
+- `random.uuid` - UUID-like strings
+
+**Faker Generators:**
+- `faker.name` - Full names
+- `faker.email` - Email addresses
+- `faker.user_name` - Usernames
+- `faker.company` - Company names
+- `faker.city` - City names
+- `faker.country` - Country names
+- `faker.country_code` - Country codes (US, FR, etc.)
+- `faker.sentence` - Sentences with word count boundaries
+- `faker.paragraph` - Paragraphs
+- `faker.url` - URLs
+- `faker.ipv4` - IPv4 addresses
+
+**Vector Generators:**
+- `vector.random_normalized` - L2-normalized vectors (for cosine similarity)
+- `vector.random` - Uniform random vectors
+- `vector.gaussian` - Gaussian-distributed vectors
+
+### Field Types
+
+- **TAG**: Exact-match searchable tags (indexed, not tokenized)
+- **TEXT**: Full-text searchable text (tokenized, stemmed)
+- **NUMERIC**: Numeric values (sortable, range queries)
+- **VECTOR**: Vector embeddings (similarity search)
+- **GEO**: Geographic coordinates (radius queries)
+
+### Creating Custom Schemas
+
+1. Copy an example schema:
+```bash
+cp schemas/ecommerce.yaml schemas/my-schema.yaml
+```
+
+2. Edit the schema:
+```bash
+nano schemas/my-schema.yaml
+```
+
+3. Run benchmark with your schema:
+```bash
+uv run python -m rqe.cli -s schemas/my-schema.yaml -n 10000
+```
+
+### Included Schemas
+
+- **`schemas/ecommerce.yaml`**: E-commerce products (HASH storage, 5 fields)
+- **`schemas/user.yaml`**: User profiles with vectors (JSON storage, 9 fields)
 
 ---
 
@@ -117,77 +254,77 @@ python main.py --docs 10000
 
 ```bash
 # Show help and all available options
-python main.py --help
+uv run python -m rqe.cli --help
 
-# Run all benchmarks with all approaches (default)
-python main.py
+# Run all benchmarks with default schema (ecommerce)
+uv run python -m rqe.cli
+
+# Run with custom schema
+uv run python -m rqe.cli --schema schemas/user.yaml
+uv run python -m rqe.cli -s schemas/my-schema.yaml
 
 # Run specific approach
-python main.py --approach naive
-python main.py --approach threaded
-python main.py --approach async
+uv run python -m rqe.cli --approach naive
+uv run python -m rqe.cli --approach threaded
+uv run python -m rqe.cli --approach async
 
 # Run multiple approaches (compare them)
-python main.py --approach naive,threaded
-python main.py --approach threaded,async
-python main.py --approach all  # All three approaches
+uv run python -m rqe.cli --approach naive,threaded
+uv run python -m rqe.cli --approach threaded,async
+uv run python -m rqe.cli --approach all  # All three approaches
 
 # Run specific test
-python main.py --test seeding
-python main.py --test topk
-python main.py --test cursor
+uv run python -m rqe.cli --test seeding
+uv run python -m rqe.cli --test topk
+uv run python -m rqe.cli --test cursor
 
 # Run multiple tests
-python main.py --test seeding,topk
-python main.py --test all  # All three tests
+uv run python -m rqe.cli --test seeding,topk
+uv run python -m rqe.cli --test all  # All three tests
 
 # Combine options
-python main.py --approach threaded,async --test seeding
-python main.py -a async -t topk,cursor
+uv run python -m rqe.cli -s schemas/user.yaml -a threaded,async -t seeding
+uv run python -m rqe.cli -a async -t topk,cursor -n 50000
 
 # Custom document count
-python main.py --docs 50000
-python main.py -n 100000
-
-# Custom index and prefix
-python main.py --index my_index --prefix mydata:
+uv run python -m rqe.cli --docs 50000
+uv run python -m rqe.cli -n 100000
 
 # Quiet mode (minimal output, CSV-like)
-python main.py --quiet
-python main.py -q
+uv run python -m rqe.cli --quiet
+uv run python -m rqe.cli -q
 ```
 
 ### Short Options
 
 | Short | Long | Description |
 |-------|------|-------------|
+| `-s` | `--schema` | Path to schema YAML file |
 | `-a` | `--approach` | Implementation approach(es) to benchmark |
 | `-t` | `--test` | Test type(s) to run |
 | `-n` | `--docs` | Number of documents to seed |
-| `-i` | `--index` | RediSearch index name |
-| `-p` | `--prefix` | Document key prefix |
 | `-q` | `--quiet` | Quiet mode (minimal output) |
 
 ### Examples
 
 ```bash
-# Compare threaded vs async for seeding only
-python main.py -a threaded,async -t seeding -n 50000
+# Compare threaded vs async for seeding with user schema
+uv run python -m rqe.cli -s schemas/user.yaml -a threaded,async -t seeding -n 50000
 
-# Quick test with 1000 docs
-python main.py -n 1000
+# Quick test with 1000 docs (default ecommerce schema)
+uv run python -m rqe.cli -n 1000
 
 # Full benchmark with all approaches and tests
-python main.py -a all -t all
+uv run python -m rqe.cli -a all -t all
 
-# Test async performance on cursor aggregation
-python main.py -a async -t cursor
+# Test async performance on cursor aggregation with custom schema
+uv run python -m rqe.cli -s schemas/my-schema.yaml -a async -t cursor
 
 # Compare all approaches on Top-K aggregation
-python main.py -a all -t topk -n 100000
+uv run python -m rqe.cli -a all -t topk -n 100000
 
 # Quiet mode for scripting/logging
-python main.py -q > benchmark_results.txt
+uv run python -m rqe.cli -q > benchmark_results.txt
 ```
 
 ---
@@ -206,11 +343,37 @@ python main.py -q > benchmark_results.txt
 │ Redis Username       │ default                                            │
 │ Redis Password       │ ●●●●●●●●                                           │
 │ Parallel Workers     │ 8                                                  │
-│ Connection Pool Size │ 8                                                  │
-│ Seed Batch Size      │ 20,000                                             │
-│ Aggregate Batch Size │ 20,000                                             │
+│ Connection Pool Size │ 12                                                 │
+│ Seed Batch Size      │ 2,000                                              │
+│ Aggregate Batch Size │ 2,000                                              │
 │ uvloop               │ ✓ Available                                        │
 ╰──────────────────────┴────────────────────────────────────────────────────╯
+```
+
+### Schema Display
+
+```
+📋 Schema
+╭────────────────────┬───────────────────────────╮
+│ Property           │ Value                     │
+├────────────────────┼───────────────────────────┤
+│ Index Name         │ ecommerce-idx             │
+│ Prefix             │ product:                  │
+│ Storage Type       │ HASH                      │
+│ Fields             │ 5                         │
+│ Aggregation Fields │ country, category, status │
+╰────────────────────┴───────────────────────────╯
+
+🔧 Fields
+╭──────────┬─────────┬────────────────────────╮
+│ Name     │ Type    │ Generator              │
+├──────────┼─────────┼────────────────────────┤
+│ country  │ TAG     │ random.choice          │
+│ category │ TAG     │ random.choice          │
+│ status   │ TAG     │ random.weighted_choice │
+│ price    │ NUMERIC │ random.gauss           │
+│ ts       │ NUMERIC │ random.timestamp       │
+╰──────────┴─────────┴────────────────────────╯
 ```
 
 ### Progress Bars
@@ -334,8 +497,6 @@ AGGREGATE_BATCH_SIZE=20000
 
 ```
 rqe-quick/
-├── main.py                    # CLI entry point
-├── main_old.py                # Original monolithic implementation (backup)
 ├── pyproject.toml             # Project metadata and dependencies (uv)
 ├── uv.lock                    # Locked dependencies (uv)
 ├── requirements.txt           # Python dependencies (pip fallback)
@@ -345,23 +506,37 @@ rqe-quick/
 ├── .gitignore                 # Protects .env from being committed
 │
 ├── README.md                  # This file
-├── README_old.md              # Previous README (backup)
 ├── CLAUDE.md                  # Notes for Claude AI assistant
+│
+├── schemas/                   # Schema definitions
+│   ├── ecommerce.yaml         # E-commerce products schema (default)
+│   └── user.yaml              # User profiles schema (with vectors)
 │
 └── rqe/                       # Main package
     ├── __init__.py
     ├── config.py              # Configuration management
     ├── connection.py          # RedisConnectionPool class
     ├── helpers.py             # Shared helper functions
-    ├── index.py               # Index management functions
-    ├── benchmark.py           # Benchmark runner
+    ├── index.py               # Schema-driven index management
+    ├── benchmark.py           # Schema-driven benchmark runner
     ├── cli.py                 # CLI interface with Rich
     │
-    ├── seeding/               # Seeding implementations
+    ├── schema/                # Schema infrastructure
     │   ├── __init__.py
-    │   ├── naive.py           # Sequential seeding
-    │   ├── threaded.py        # Parallel seeding with threads
-    │   └── async_impl.py      # Async seeding with uvloop
+    │   ├── models.py          # Pydantic schema models
+    │   └── loader.py          # YAML schema loader
+    │
+    ├── generators/            # Data generators
+    │   ├── __init__.py
+    │   ├── base.py            # Base generator class
+    │   ├── random_gen.py      # Random-based generators
+    │   ├── faker_gen.py       # Faker-based generators
+    │   ├── vector_gen.py      # Vector generators
+    │   └── registry.py        # Generator factory
+    │
+    ├── seeding/               # Schema-driven seeding
+    │   ├── __init__.py
+    │   └── schema_based.py    # Naive/threaded/async seeding
     │
     └── aggregation/           # Aggregation implementations
         ├── __init__.py
@@ -472,14 +647,15 @@ rqe-quick/
 
 ```python
 from rqe.benchmark import BenchmarkRunner
-from rqe.config import Config
+from rqe.schema import load_schema
+
+# Load schema
+schema = load_schema("schemas/ecommerce.yaml")
 
 # Create benchmark runner
 runner = BenchmarkRunner(
-    index="idx_orders",
-    prefix="order:",
-    n_docs=100_000,
-    fields=["country", "status"]
+    schema=schema,
+    n_docs=100_000
 )
 
 # Setup index
@@ -487,14 +663,50 @@ runner.setup_index(recreate=True)
 
 # Run seeding benchmark
 result = runner.run_seeding(approach="async")
-print(f"Seeding took {result.elapsed:.2f}s")
+print(f"Seeding took {result.elapsed_time:.2f}s")
 
 # Run aggregation benchmark
 result = runner.run_aggregation(test_type="topk", approach="async")
-print(f"Top-K aggregation took {result.elapsed:.2f}s")
+print(f"Top-K aggregation took {result.elapsed_time:.2f}s")
 
 # Cleanup
 runner.cleanup()
+```
+
+### Creating Schemas Programmatically
+
+```python
+from rqe.schema import BenchmarkSchema, IndexSchema, FieldSchema
+
+# Create schema programmatically
+schema = BenchmarkSchema(
+    version="0.1.0",
+    index=IndexSchema(
+        name="my-idx",
+        prefix="doc:",
+        storage_type="hash"
+    ),
+    fields=[
+        FieldSchema(
+            name="category",
+            type="tag",
+            generator="random.choice",
+            generator_args={"choices": ["A", "B", "C"]}
+        ),
+        FieldSchema(
+            name="score",
+            type="numeric",
+            generator="random.randint",
+            generator_args={"min": 0, "max": 100}
+        )
+    ],
+    aggregations=[
+        {"field": "category"}
+    ]
+)
+
+# Use in benchmark
+runner = BenchmarkRunner(schema=schema, n_docs=10000)
 ```
 
 ### Custom Configuration
@@ -701,23 +913,23 @@ For issues or questions:
 ### Common Commands
 
 ```bash
-# Full benchmark (all approaches, all tests)
-python main.py
+# Full benchmark with default schema (all approaches, all tests)
+uv run python -m rqe.cli
 
-# Quick test
-python main.py -n 10000
+# Quick test with custom schema
+uv run python -m rqe.cli -s schemas/user.yaml -n 10000
 
 # Compare async vs threaded
-python main.py -a async,threaded
+uv run python -m rqe.cli -a async,threaded
 
-# Test seeding only
-python main.py -t seeding
+# Test seeding only with custom schema
+uv run python -m rqe.cli -s schemas/my-schema.yaml -t seeding
 
 # Quiet mode for logging
-python main.py -q > results.txt
+uv run python -m rqe.cli -q > results.txt
 
 # Help
-python main.py --help
+uv run python -m rqe.cli --help
 ```
 
 ### Performance Expectations

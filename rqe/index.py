@@ -3,84 +3,8 @@ Redis RediSearch index management.
 """
 
 from time import time, sleep
+from typing import Optional, List, Tuple
 from .helpers import _to_text
-
-
-def ensure_index_hash(
-    r,
-    index: str,
-    prefix: str,
-    *,
-    if_exists: str = "reuse"  # "reuse" | "drop" | "recreate_if_mismatch"
-) -> str:
-    """
-    Ensure a HASH index exists with expected schema.
-    
-    Args:
-        r: Redis client
-        index: Index name
-        prefix: Key prefix for the index
-        if_exists: What to do if index exists ("reuse", "drop", "recreate_if_mismatch")
-        
-    Returns:
-        "created" | "reused" | "recreated"
-    """
-    expected = [
-        ("country",  "TAG"),
-        ("category", "TAG"),
-        ("status",   "TAG"),
-        ("price",    "NUMERIC"),
-        ("ts",       "NUMERIC"),
-    ]
-
-    def _ok(resp): 
-        return resp in (b"OK", "OK")
-
-    def _info_dict():
-        try:
-            return r.execute_command("FT.INFO", index)
-        except Exception:
-            return None
-
-    info = _info_dict()
-    if info:
-        if if_exists == "drop":
-            r.execute_command("FT.DROPINDEX", index, "DD")
-            info = None
-        elif if_exists == "recreate_if_mismatch":
-            # Check prefix + attribute names/types
-            prefixes = (info.get("index_definition") or info.get(b"index_definition") or {}).get("prefixes") \
-                       or (info.get(b"index_definition") or {}).get(b"prefixes")
-            prefixes = [p.decode() if isinstance(p, bytes) else p for p in (prefixes or [])]
-            attrs = info.get("attributes") or info.get(b"attributes") or []
-            got = [( (a.get("attribute") or a.get(b"attribute")),
-                     (a.get("type") or a.get(b"type")) ) for a in attrs]
-            got = [(x.decode() if isinstance(x, bytes) else x,
-                    y.decode() if isinstance(y, bytes) else y) for x, y in got]
-            exp_ok = set(expected).issubset(set(got)) and (prefix in prefixes)
-            if not exp_ok:
-                r.execute_command("FT.DROPINDEX", index, "DD")
-                info = None
-
-    if not info:
-        # Create fresh index
-        args = [
-            "FT.CREATE", index,
-            "ON", "HASH",
-            "PREFIX", 1, prefix,
-            "SCHEMA",
-            "country",  "TAG",     "SORTABLE",
-            "category", "TAG",     "SORTABLE",
-            "status",   "TAG",     "SORTABLE",
-            "price",    "NUMERIC", "SORTABLE",
-            "ts",       "NUMERIC", "SORTABLE",
-        ]
-        ok = r.execute_command(*args)
-        if not _ok(ok):
-            raise RuntimeError(f"FT.CREATE failed: {ok}")
-        return "created" if if_exists != "recreate_if_mismatch" else "recreated"
-
-    return "reused"
 
 
 def wait_until_indexed(
@@ -137,6 +61,168 @@ def wait_until_indexed(
             raise TimeoutError(
                 f"Index '{index}' not ready after {timeout_s}s (percent_indexed={last:.4f})"
             )
-        
+
         sleep(poll_every_s)
+
+
+def create_index_from_schema(r, schema, *, if_exists: str = "reuse") -> str:
+    """
+    Create a RediSearch index from a BenchmarkSchema.
+
+    Args:
+        r: Redis client
+        schema: BenchmarkSchema object
+        if_exists: What to do if index exists ("reuse", "drop", "recreate")
+
+    Returns:
+        "created" | "reused" | "recreated"
+    """
+    from .schema.models import BenchmarkSchema
+
+    if not isinstance(schema, BenchmarkSchema):
+        raise TypeError(f"Expected BenchmarkSchema, got {type(schema)}")
+
+    index_name = schema.index.name
+
+    # Check if index exists
+    def _info_dict():
+        try:
+            return r.execute_command("FT.INFO", index_name)
+        except Exception:
+            return None
+
+    info = _info_dict()
+
+    if info:
+        if if_exists == "drop" or if_exists == "recreate":
+            r.execute_command("FT.DROPINDEX", index_name, "DD")
+            info = None
+        elif if_exists == "reuse":
+            return "reused"
+
+    if not info:
+        # Build FT.CREATE command
+        cmd = ["FT.CREATE", index_name]
+
+        # Storage type
+        cmd.extend(["ON", schema.index.storage_type.upper()])
+
+        # Prefix
+        cmd.extend(["PREFIX", "1", schema.index.prefix])
+
+        # Schema fields
+        cmd.append("SCHEMA")
+
+        is_json = schema.index.storage_type.lower() == 'json'
+
+        for field in schema.fields:
+            # For JSON storage, use JSONPath syntax ($.fieldname)
+            # For HASH storage, use plain field name
+            field_path = f"$.{field.name}" if is_json else field.name
+
+            cmd.append(field_path)
+            cmd.append("AS")
+            cmd.append(field.name)
+
+            # Add field type and attributes
+            if field.type == "vector":
+                if not field.attrs:
+                    raise ValueError(f"Vector field '{field.name}' requires attrs")
+
+                attrs = field.attrs
+                # For vector fields, the type is specified as "VECTOR <algorithm> <params>"
+                cmd.append("VECTOR")
+                cmd.append(attrs.algorithm.upper())
+
+                # Count attributes
+                attr_dict = {
+                    "TYPE": attrs.datatype.upper(),
+                    "DIM": str(attrs.dims),
+                    "DISTANCE_METRIC": attrs.distance_metric.upper(),
+                }
+
+                if attrs.algorithm.upper() == "HNSW":
+                    if attrs.initial_cap:
+                        attr_dict["INITIAL_CAP"] = str(attrs.initial_cap)
+                    if attrs.m:
+                        attr_dict["M"] = str(attrs.m)
+                    if attrs.ef_construction:
+                        attr_dict["EF_CONSTRUCTION"] = str(attrs.ef_construction)
+                    if attrs.ef_runtime:
+                        attr_dict["EF_RUNTIME"] = str(attrs.ef_runtime)
+
+                cmd.append(str(len(attr_dict) * 2))
+                for k, v in attr_dict.items():
+                    cmd.append(k)
+                    cmd.append(v)
+
+            elif field.type == "tag":
+                cmd.append("TAG")
+                if field.attrs:
+                    if hasattr(field.attrs, 'separator') and field.attrs.separator:
+                        cmd.append("SEPARATOR")
+                        cmd.append(field.attrs.separator)
+                    if hasattr(field.attrs, 'casesensitive') and field.attrs.casesensitive:
+                        cmd.append("CASESENSITIVE")
+
+            elif field.type == "text":
+                cmd.append("TEXT")
+                if field.attrs:
+                    if hasattr(field.attrs, 'weight') and field.attrs.weight:
+                        cmd.append("WEIGHT")
+                        cmd.append(str(field.attrs.weight))
+                    if hasattr(field.attrs, 'nostem') and field.attrs.nostem:
+                        cmd.append("NOSTEM")
+                    if hasattr(field.attrs, 'phonetic') and field.attrs.phonetic:
+                        cmd.append("PHONETIC")
+                        cmd.append(field.attrs.phonetic)
+
+            elif field.type == "numeric":
+                cmd.append("NUMERIC")
+                if field.attrs:
+                    if hasattr(field.attrs, 'sortable') and field.attrs.sortable:
+                        cmd.append("SORTABLE")
+                    if hasattr(field.attrs, 'noindex') and field.attrs.noindex:
+                        cmd.append("NOINDEX")
+
+            elif field.type == "geo":
+                cmd.append("GEO")
+                if field.attrs:
+                    if hasattr(field.attrs, 'noindex') and field.attrs.noindex:
+                        cmd.append("NOINDEX")
+
+            else:
+                # Default: just add the type
+                cmd.append(field.type.upper())
+
+        # Execute command
+        result = r.execute_command(*cmd)
+        if result not in (b"OK", "OK"):
+            raise RuntimeError(f"FT.CREATE failed: {result}")
+
+        return "created" if not info else "recreated"
+
+
+def validate_index_schema(r, schema) -> Tuple[bool, List[str]]:
+    """
+    Validate that a Redis index matches the schema definition.
+
+    Args:
+        r: Redis client
+        schema: BenchmarkSchema object
+
+    Returns:
+        Tuple of (is_valid, list_of_errors)
+    """
+    from .schema.models import BenchmarkSchema
+
+    if not isinstance(schema, BenchmarkSchema):
+        raise TypeError(f"Expected BenchmarkSchema, got {type(schema)}")
+
+    try:
+        info = r.execute_command("FT.INFO", schema.index.name)
+    except Exception as e:
+        return False, [f"Index '{schema.index.name}' does not exist: {e}"]
+
+    return schema.validate_against_redis_index(info)
 
