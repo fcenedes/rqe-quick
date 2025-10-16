@@ -1,0 +1,10 @@
+[project]
+name = "rqe-quick"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "dotenv>=0.9.9",
+    "hiredis>=3.3.0",
+    "redis>=6.4.0",
+]
