@@ -314,7 +314,26 @@ uv sync
 
 ---
 
+## Code Cleanup (2025-10-16)
+
+### Removed Functions
+- `recreate_index_hash()` - Not used in main(), only `ensure_index_hash()` needed
+- `debug_index()` - Not called anywhere, removed for cleaner codebase
+
+### Import Optimizations
+- Consolidated `time` imports: `from time import perf_counter, time, sleep`
+- Removed `import multiprocessing`, using `os.cpu_count()` instead
+- Removed duplicate `import time`
+
+### Result
+- Reduced from **989 lines to 934 lines** (-55 lines)
+- Kept both original and fast functions for comparison
+- Code remains readable and well-structured
+
+---
+
 ## Last Updated
 
 2025-10-16 - Initial creation with project context and architecture notes
+2025-10-16 - Code cleanup: removed unused functions, optimized imports
 

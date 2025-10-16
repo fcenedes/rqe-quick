@@ -1,11 +1,9 @@
 import random
-import time
-from time import perf_counter
+import os
+from time import perf_counter, time, sleep
 from typing import Dict, Iterable, List, Tuple, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import multiprocessing
 from threading import Lock
-import os
 
 import redis
 from dotenv import load_dotenv
@@ -321,7 +319,7 @@ def count_by_fields_resp3_fast(
         connection_pool: Optional pre-allocated connection pool. If None, creates temporary connections.
     """
     if n_workers is None:
-        n_workers = min(multiprocessing.cpu_count(), 8)
+        n_workers = min(os.cpu_count() or 4, 8)
 
     start_time = perf_counter()
     fields = list(fields)
@@ -456,33 +454,6 @@ def count_by_fields_resp3_fast(
 # -----------------------------
 # Schema + Dummy data generator
 # -----------------------------
-def recreate_index_hash(
-    r: redis.Redis,
-    index: str,
-    prefix: str,
-    *,
-    drop_docs: bool = True
-):
-    """Drop & create a HASH index with SORTABLE fields for fast aggregations."""
-    # Drop if exists
-    try:
-        r.execute_command("FT.DROPINDEX", index, "DD" if drop_docs else "")
-    except Exception:
-        pass  # ignore if not exists
-
-    # Create fresh index (HASH)
-    r.execute_command(
-        "FT.CREATE", index,
-        "ON", "HASH",
-        "PREFIX", 1, prefix,
-        "SCHEMA",
-        "country", "TAG", "SORTABLE",
-        "category", "TAG", "SORTABLE",
-        "status", "TAG", "SORTABLE",
-        "price", "NUMERIC", "SORTABLE",
-        "ts", "NUMERIC", "SORTABLE"
-    )
-
 def ensure_index_hash(
     r,
     index: str,
@@ -618,7 +589,7 @@ def seed_dummy_hash_docs_fast(
         connection_pool: Optional pre-allocated connection pool. If None, creates temporary connections.
     """
     if n_workers is None:
-        n_workers = min(multiprocessing.cpu_count(), 8)
+        n_workers = min(os.cpu_count() or 4, 8)
 
     # Shared constants
     countries = ["US", "FR", "DE", "IN", "BR", "CN", "GB", "ES", "IT", "JP"]
@@ -703,28 +674,6 @@ def seed_dummy_hash_docs_fast(
 
     return total_inserted
 
-def debug_index(r, index: str, prefix: str):
-    print("\n--- FT.INFO ---")
-    info = r.execute_command("FT.INFO", index)
-    print(info)  # map (RESP3) or flat list (RESP2)
-
-    print("\n--- Example key ---")
-    # confirm keys exist under the prefix
-    k = r.execute_command("SCAN", 0, "MATCH", f"{prefix}*", "COUNT", 1)
-    print(k)
-    if isinstance(k, (list, tuple)) and k[1]:
-        sample = k[1][0]
-        print("Sample key:", sample)
-        print("HGETALL:", r.hgetall(sample))
-
-    print("\n--- FT.SEARCH smoke test ---")
-    # ask for 3 docs and return the grouping fields
-    res = r.execute_command(
-        "FT.SEARCH", index, "*", "LIMIT", 0, 3,
-        "RETURN", 6, "country", "category", "status", "price", "ts", "__key",
-        "DIALECT", 4
-    )
-    print(res)
 
 def wait_until_indexed(
     r,
@@ -735,8 +684,7 @@ def wait_until_indexed(
     target: float = 0.999  # 99.9%
 ) -> float:
     """Poll FT.INFO until percent_indexed >= target (or indexing==0), or timeout."""
-    import time
-    t0 = time.time()
+    t0 = time()
     last = 0.0
 
     def _get(info, key):
@@ -749,8 +697,6 @@ def wait_until_indexed(
                 if _to_text(k) == key: return v
         return None
 
-    def _to_text(x): return x.decode() if isinstance(x, bytes) else str(x)
-
     while True:
         info = r.execute_command("FT.INFO", index)
         pct = _get(info, "percent_indexed")
@@ -760,9 +706,9 @@ def wait_until_indexed(
         last = pct
         if pct >= target or idx == 0:
             return pct
-        if time.time() - t0 > timeout_s:
+        if time() - t0 > timeout_s:
             return last
-        time.sleep(poll_every_s)
+        sleep(poll_every_s)
 
 # -----------------------------
 # Tiny test harness
