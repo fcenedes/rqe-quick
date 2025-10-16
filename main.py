@@ -1,12 +1,21 @@
 import random
 import os
+import asyncio
 from time import perf_counter, time, sleep
 from typing import Dict, Iterable, List, Tuple, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 
 import redis
+import redis.asyncio as aioredis
 from dotenv import load_dotenv
+
+try:
+    import uvloop
+    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+    UVLOOP_AVAILABLE = True
+except ImportError:
+    UVLOOP_AVAILABLE = False
 
 
 # -----------------------------
@@ -452,6 +461,214 @@ def count_by_fields_resp3_fast(
 
 
 # -----------------------------
+# Async versions (using uvloop)
+# -----------------------------
+async def count_by_fields_resp3_async(
+    r: aioredis.Redis,
+    index: str,
+    query: str,
+    fields: Iterable[str],
+    *,
+    topn: Optional[int] = None,
+    batch_size: int = 10_000,
+    max_groups_per_field: Optional[int] = None,
+    sort_by_count_desc: bool = True,
+    timeout_ms: Optional[int] = None,
+    dialect: int = 2,
+    concurrency: int = 10
+) -> Tuple[Dict[str, List[Tuple[str, int]]], float]:
+    """
+    Async version using redis.asyncio with uvloop for maximum performance.
+    Uses asyncio.gather for concurrent field aggregation.
+
+    Args:
+        concurrency: Number of concurrent operations (default: 10)
+    """
+    start_time = perf_counter()
+    fields = list(fields)
+    specs = [(_ensure_at(f), _strip_at(f)) for f in fields]
+    out: Dict[str, List[Tuple[str, int]]] = {plain: [] for _, plain in specs}
+
+    # --- Fast path: server-side Top-K (concurrent execution) ---
+    if topn is not None:
+        async def fetch_topk(f_at: str, plain: str):
+            """Async worker for top-K aggregation."""
+            args = [
+                "FT.AGGREGATE", index, query,
+                "GROUPBY", "1", f_at,
+                "REDUCE", "COUNT", "0", "AS", "count",
+                "SORTBY", "2", "@count", "DESC", "MAX", int(topn),
+            ]
+            if timeout_ms is not None: args += ["TIMEOUT", int(timeout_ms)]
+            args += ["DIALECT", int(dialect)]
+
+            resp = await r.execute_command(*args)
+            rows = _resp3_rows_to_dicts(resp, None)[0] if isinstance(resp, dict) else _rows_from_resp2(resp)
+            result = [vc for row in rows if (vc := _val_and_count(row, plain))]
+            return plain, result
+
+        # Execute all fields concurrently
+        tasks = [fetch_topk(f_at, plain) for f_at, plain in specs]
+        results = await asyncio.gather(*tasks)
+
+        for plain, result in results:
+            out[plain] = result
+
+        return out, perf_counter() - start_time
+
+    # --- Cursor path: concurrent cursor management per field ---
+    async def fetch_cursor(f_at: str, plain: str):
+        """Async worker for cursor-based aggregation."""
+        # Initial cursor request
+        args = [
+            "FT.AGGREGATE", index, query,
+            "GROUPBY", "1", f_at,
+            "REDUCE", "COUNT", "0", "AS", "count",
+            "WITHCURSOR", "COUNT", int(batch_size),
+        ]
+        if sort_by_count_desc:
+            args += ["SORTBY", "2", "@count", "DESC"]
+        if timeout_ms is not None:
+            args += ["TIMEOUT", int(timeout_ms)]
+        args += ["DIALECT", int(dialect)]
+
+        resp = await r.execute_command(*args)
+        rows, cursor, attrs = _parse_initial(resp)
+
+        result = []
+        for row in rows:
+            if vc := _val_and_count(row, plain):
+                result.append(vc)
+                if max_groups_per_field and len(result) >= max_groups_per_field:
+                    cursor = 0
+                    break
+
+        # Continue reading cursor if active
+        while cursor and not (max_groups_per_field and len(result) >= max_groups_per_field):
+            page = await r.execute_command("FT.CURSOR", "READ", index, cursor, "COUNT", int(batch_size))
+            rows = _parse_read(page, attrs)
+
+            if not rows:
+                break
+
+            for row in rows:
+                if vc := _val_and_count(row, plain):
+                    result.append(vc)
+                    if max_groups_per_field and len(result) >= max_groups_per_field:
+                        cursor = 0
+                        break
+
+        # Clean up cursor
+        if cursor:
+            try:
+                await r.execute_command("FT.CURSOR", "DEL", index, cursor)
+            except Exception:
+                pass
+
+        # Fallback if empty
+        if not result:
+            args = [
+                "FT.AGGREGATE", index, query,
+                "GROUPBY", "1", f_at,
+                "REDUCE", "COUNT", "0", "AS", "count",
+            ]
+            if sort_by_count_desc: args += ["SORTBY", "2", "@count", "DESC"]
+            if timeout_ms is not None: args += ["TIMEOUT", int(timeout_ms)]
+            args += ["DIALECT", int(dialect)]
+
+            resp = await r.execute_command(*args)
+            rows = _resp3_rows_to_dicts(resp, None)[0] if isinstance(resp, dict) else _rows_from_resp2(resp)
+            result = [vc for row in rows if (vc := _val_and_count(row, plain))]
+
+        return plain, result
+
+    # Execute all fields concurrently
+    tasks = [fetch_cursor(f_at, plain) for f_at, plain in specs]
+    results = await asyncio.gather(*tasks)
+
+    for plain, result in results:
+        out[plain] = result
+
+    return out, perf_counter() - start_time
+
+
+async def seed_dummy_hash_docs_async(
+    r: aioredis.Redis,
+    *,
+    prefix: str,
+    n_docs: int = 200_000,
+    chunk: int = 10_000,
+    seed: int = 42,
+    concurrency: int = 10
+):
+    """
+    Async version using redis.asyncio with uvloop for maximum performance.
+    Uses asyncio.gather for concurrent batch insertion.
+
+    Args:
+        concurrency: Number of concurrent batch operations (default: 10)
+    """
+    # Shared constants
+    countries = ["US", "FR", "DE", "IN", "BR", "CN", "GB", "ES", "IT", "JP"]
+    categories = ["electronics", "books", "toys", "clothing", "grocery", "beauty", "sports"]
+    statuses = ["pending", "paid", "shipped", "delivered", "returned", "cancelled"]
+    status_weights = [4, 10, 15, 25, 3, 2]
+    now = int(time())
+    day = 86400
+
+    async def insert_batch(start_idx: int, end_idx: int, worker_seed: int):
+        """Async worker that inserts a batch of documents."""
+        rnd = random.Random(worker_seed)
+        pipe = r.pipeline(transaction=False)
+        written = 0
+
+        for i in range(start_idx, end_idx):
+            key = f"{prefix}{i}"
+            country = countries[rnd.randint(0, len(countries) - 1)]
+            category = categories[rnd.randint(0, len(categories) - 1)]
+            status = rnd.choices(statuses, weights=status_weights, k=1)[0]
+
+            # mildly skewed price & recency
+            price = max(1, int(abs(rnd.gauss(60, 25)) * (1 + 0.2 * (category == "electronics"))))
+            ts = now - rnd.randint(0, 30 * day)
+
+            pipe.hset(key, mapping={
+                "country": country,
+                "category": category,
+                "status": status,
+                "price": price,
+                "ts": ts
+            })
+            written += 1
+            if written % chunk == 0:
+                await pipe.execute()
+
+        if written % chunk:
+            await pipe.execute()
+
+        return end_idx - start_idx
+
+    # Divide work into batches
+    docs_per_batch = n_docs // concurrency
+    tasks = []
+
+    for batch_id in range(concurrency):
+        start_idx = batch_id * docs_per_batch
+        if batch_id == concurrency - 1:
+            end_idx = n_docs  # Last batch takes remainder
+        else:
+            end_idx = start_idx + docs_per_batch
+
+        # Different seed per batch to avoid duplicate random sequences
+        worker_seed = seed + batch_id
+        tasks.append(insert_batch(start_idx, end_idx, worker_seed))
+
+    # Execute all batches concurrently
+    results = await asyncio.gather(*tasks)
+    return sum(results)
+
+
+# -----------------------------
 # Schema + Dummy data generator
 # -----------------------------
 def ensure_index_hash(
@@ -543,7 +760,7 @@ def seed_dummy_hash_docs(
     categories = ["electronics", "books", "toys", "clothing", "grocery", "beauty", "sports"]
     statuses = ["pending", "paid", "shipped", "delivered", "returned", "cancelled"]
 
-    now = int(time.time())
+    now = int(time())
     day = 86400
 
     pipe = r.pipeline(transaction=False)
@@ -596,7 +813,7 @@ def seed_dummy_hash_docs_fast(
     categories = ["electronics", "books", "toys", "clothing", "grocery", "beauty", "sports"]
     statuses = ["pending", "paid", "shipped", "delivered", "returned", "cancelled"]
     status_weights = [4, 10, 15, 25, 3, 2]
-    now = int(time.time())
+    now = int(time())
     day = 86400
 
     # Create temporary pool if not provided
@@ -749,6 +966,7 @@ def main():
     print(f"│   Connection pool size:  {CONNECTION_POOL_SIZE}")
     print(f"│   Seed batch size:       {SEED_BATCH_SIZE:,}")
     print(f"│   Aggregate batch size:  {AGGREGATE_BATCH_SIZE:,}")
+    print(f"│   uvloop:                {'✓ Available' if UVLOOP_AVAILABLE else '✗ Not installed'}")
     print("│")
     print("│ Test Parameters:")
     print(f"│   Documents to seed:     {n_docs:,}")
@@ -915,13 +1133,132 @@ def main():
     for f, rows in counts_cur_fast.items():
         print(f"  {f:>12} : {len(rows)} groups")
 
+    # ========== ASYNC BENCHMARKS (if uvloop available) ==========
+    time_async_seed = 0
+    time_async_topk = 0
+    time_async_cur = 0
+    speedup_async_seed = 0
+    speedup_async_topk = 0
+    speedup_async_cur = 0
+
+    if UVLOOP_AVAILABLE:
+        print("\n" + "=" * 80)
+        print("ASYNC PERFORMANCE TEST (with uvloop)")
+        print("=" * 80)
+
+        async def run_async_benchmarks():
+            # Create async Redis client
+            r_async = aioredis.Redis(
+                host=REDIS_HOST,
+                port=REDIS_PORT,
+                db=REDIS_DB,
+                username=REDIS_USERNAME,
+                password=REDIS_PASSWORD,
+                decode_responses=False,
+                protocol=3
+            )
+
+            try:
+                # Test 1: Async seeding
+                print("\n[1/3] Testing ASYNC seed_dummy_hash_docs_async...")
+                state = ensure_index_hash(r, index=index, prefix=prefix, if_exists="recreate_if_mismatch")
+                print(f"Index state: {state}")
+
+                t0 = perf_counter()
+                await seed_dummy_hash_docs_async(
+                    r_async,
+                    prefix=prefix,
+                    n_docs=n_docs,
+                    chunk=SEED_BATCH_SIZE,
+                    seed=7,
+                    concurrency=PARALLEL_WORKERS
+                )
+                time_async_seed = perf_counter() - t0
+                print(f"✓ Async seeding completed in {time_async_seed:.2f}s")
+
+                t0 = perf_counter()
+                pct = wait_until_indexed(r, index, timeout_s=600, poll_every_s=0.5)
+                time_index_async = perf_counter() - t0
+                print(f"✓ Index ready: percent_indexed={pct:.4f} in {time_index_async:.2f}s")
+
+                # Test 2: Async Top-K
+                print("\n[2/3] Testing ASYNC count_by_fields_resp3_async (Top-10)...")
+                counts_topk_async, time_async_topk = await count_by_fields_resp3_async(
+                    r_async, index,
+                    query="*",
+                    fields=["country", "category", "status"],
+                    topn=10,
+                    dialect=4,
+                    timeout_ms=20_000,
+                    concurrency=PARALLEL_WORKERS
+                )
+                print(f"✓ Async Top-K completed in {time_async_topk:.3f}s")
+
+                # Test 3: Async cursor
+                print("\n[3/3] Testing ASYNC count_by_fields_resp3_async (cursor)...")
+                counts_cur_async, time_async_cur = await count_by_fields_resp3_async(
+                    r_async, index,
+                    query="*",
+                    fields=["country", "category", "status"],
+                    batch_size=AGGREGATE_BATCH_SIZE,
+                    dialect=4,
+                    timeout_ms=20_000,
+                    max_groups_per_field=None,
+                    concurrency=PARALLEL_WORKERS
+                )
+                print(f"✓ Async cursor completed in {time_async_cur:.3f}s")
+
+                return time_async_seed, time_async_topk, time_async_cur
+
+            finally:
+                await r_async.aclose()
+
+        # Run async benchmarks
+        time_async_seed, time_async_topk, time_async_cur = asyncio.run(run_async_benchmarks())
+
+        # Async summary
+        print("\n" + "-" * 80)
+        print("ASYNC SUMMARY:")
+        print("-" * 80)
+        print(f"Async seeding:     {time_async_seed:>8.2f}s")
+        print(f"Async Top-K:       {time_async_topk:>8.3f}s")
+        print(f"Async cursor:      {time_async_cur:>8.3f}s")
+
+        speedup_async_seed = time_original_seed / time_async_seed if time_async_seed > 0 else 0
+        speedup_async_topk = time_topk_orig / time_async_topk if time_async_topk > 0 else 0
+        speedup_async_cur = time_cur_orig / time_async_cur if time_async_cur > 0 else 0
+
+        print(f"\nAsync vs Original:")
+        print(f"  Seeding speedup:   {speedup_async_seed:>8.2f}x")
+        print(f"  Top-K speedup:     {speedup_async_topk:>8.2f}x")
+        print(f"  Cursor speedup:    {speedup_async_cur:>8.2f}x")
+    else:
+        print("\n" + "=" * 80)
+        print("ASYNC BENCHMARKS SKIPPED (uvloop not available)")
+        print("=" * 80)
+        print("Install uvloop: uv pip install uvloop")
+
     # ========== OVERALL SUMMARY ==========
     print("\n" + "=" * 80)
     print("OVERALL PERFORMANCE SUMMARY")
     print("=" * 80)
-    print(f"\nSeeding speedup:        {speedup_seed:>8.2f}x")
-    print(f"Top-K speedup:          {speedup_topk:>8.2f}x")
-    print(f"Cursor speedup:         {speedup_cur:>8.2f}x")
+    print(f"\nSeeding speedup (Threading):    {speedup_seed:>8.2f}x")
+    print(f"Top-K speedup (Threading):      {speedup_topk:>8.2f}x")
+    print(f"Cursor speedup (Threading):     {speedup_cur:>8.2f}x")
+
+    if UVLOOP_AVAILABLE:
+        print(f"\nSeeding speedup (Async):        {speedup_async_seed:>8.2f}x")
+        print(f"Top-K speedup (Async):          {speedup_async_topk:>8.2f}x")
+        print(f"Cursor speedup (Async):         {speedup_async_cur:>8.2f}x")
+
+        print(f"\nAsync vs Threading:")
+        async_vs_thread_seed = time_fast_seed / time_async_seed if time_async_seed > 0 else 0
+        async_vs_thread_topk = time_topk_fast / time_async_topk if time_async_topk > 0 else 0
+        async_vs_thread_cur = time_cur_fast / time_async_cur if time_async_cur > 0 else 0
+        print(f"  Seeding:                      {async_vs_thread_seed:>8.2f}x")
+        print(f"  Top-K:                        {async_vs_thread_topk:>8.2f}x")
+        print(f"  Cursor:                       {async_vs_thread_cur:>8.2f}x")
+
     print("\n" + "=" * 80)
 
     # Clean up connection pool

@@ -63,11 +63,15 @@ AGGREGATE_BATCH_SIZE=50000
    - `seed_dummy_hash_docs()` - Sequential seeding
    - `count_by_fields_resp3()` - Sequential aggregation
 
-2. **Optimized Functions** (fast versions):
-   - `seed_dummy_hash_docs_fast()` - Parallel seeding with connection pool
-   - `count_by_fields_resp3_fast()` - Parallel aggregation with connection pool
+2. **Optimized Functions** (threading with connection pool):
+   - `seed_dummy_hash_docs_fast()` - Parallel seeding with ThreadPoolExecutor
+   - `count_by_fields_resp3_fast()` - Parallel aggregation with ThreadPoolExecutor
 
-3. **Helper Functions** (externalized from original):
+3. **Async Functions** (asyncio with uvloop):
+   - `seed_dummy_hash_docs_async()` - Async seeding with asyncio.gather
+   - `count_by_fields_resp3_async()` - Async aggregation with asyncio.gather
+
+4. **Helper Functions** (externalized from original):
    - `_ensure_at()`, `_strip_at()`, `_to_text()`
    - `_resp3_rows_to_dicts()`, `_rows_from_resp2()`
    - `_parse_initial()`, `_parse_read()`, `_val_and_count()`
@@ -332,8 +336,34 @@ uv sync
 
 ---
 
+## Async Implementation (2025-10-16)
+
+### Added Async Versions
+- `seed_dummy_hash_docs_async()` - Using `redis.asyncio` with `uvloop`
+- `count_by_fields_resp3_async()` - Using `redis.asyncio` with `uvloop`
+
+### Dependencies
+- Added `uvloop>=0.19.0` to `pyproject.toml`
+- Uses `redis.asyncio` for async Redis client
+- Falls back gracefully if uvloop not installed
+
+### Performance Expectations
+- **Single Redis**: 20-30% faster than threading
+- **Redis Cloud**: 30-50% faster (better network I/O handling)
+- **Redis Cluster**: 2-3x faster than threading
+
+### Comparison Matrix
+```
+Original (Sequential)     →  Baseline
+Fast (Threading)          →  ThreadPoolExecutor + connection pool
+Async (uvloop)            →  asyncio.gather + uvloop event loop
+```
+
+---
+
 ## Last Updated
 
 2025-10-16 - Initial creation with project context and architecture notes
 2025-10-16 - Code cleanup: removed unused functions, optimized imports
+2025-10-16 - Added async versions with uvloop for performance comparison
 

@@ -7,4 +7,5 @@ dependencies = [
     "dotenv>=0.9.9",
     "hiredis>=3.3.0",
     "redis>=6.4.0",
+    "uvloop>=0.19.0",
 ]
