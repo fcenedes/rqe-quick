@@ -293,6 +293,14 @@ uv run python -m rqe.cli -n 100000
 # Quiet mode (minimal output, CSV-like)
 uv run python -m rqe.cli --quiet
 uv run python -m rqe.cli -q
+
+# Verbose mode (show aggregation details and validation)
+uv run python -m rqe.cli --verbose
+uv run python -m rqe.cli -v
+
+# Recreate index (drop existing data) - use with caution!
+uv run python -m rqe.cli --recreate
+uv run python -m rqe.cli -r
 ```
 
 ### Short Options
@@ -304,6 +312,8 @@ uv run python -m rqe.cli -q
 | `-t` | `--test` | Test type(s) to run |
 | `-n` | `--docs` | Number of documents to seed |
 | `-q` | `--quiet` | Quiet mode (minimal output) |
+| `-v` | `--verbose` | Verbose mode (show aggregation details) |
+| `-r` | `--recreate` | Recreate index (drop existing data) |
 
 ### Examples
 
@@ -325,6 +335,14 @@ uv run python -m rqe.cli -a all -t topk -n 100000
 
 # Quiet mode for scripting/logging
 uv run python -m rqe.cli -q > benchmark_results.txt
+
+# Seed data once, then run multiple aggregation tests (data preserved by default)
+uv run python -m rqe.cli -a async -t seeding -n 100000
+uv run python -m rqe.cli -a async -t topk -v         # Data preserved, verbose output
+uv run python -m rqe.cli -a async -t cursor -v       # Data preserved, verbose output
+
+# Force recreate index (drops all data)
+uv run python -m rqe.cli -a async -t seeding -n 100000 -r
 ```
 
 ---
@@ -1000,6 +1018,8 @@ uv run python -m rqe.cli --help
 | `--test` | `-t` | `seeding`, `topk`, `cursor`, `all` | `all` | Test(s) to run |
 | `--docs` | `-n` | Integer | `500000` | Number of documents to seed |
 | `--quiet` | `-q` | Flag | `false` | Quiet mode (CSV output) |
+| `--verbose` | `-v` | Flag | `false` | Verbose mode (show aggregation details) |
+| `--recreate` | `-r` | Flag | `false` | Recreate index (drop existing data) |
 
 **Important**: For multiple values, **repeat the flag**:
 ```bash

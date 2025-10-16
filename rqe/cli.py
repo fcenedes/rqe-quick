@@ -254,12 +254,12 @@ def display_results(results, baseline_approach="naive", n_docs=None):
     help="Verbose mode (show aggregation details and validation)"
 )
 @click.option(
-    "--keep-data",
-    "-k",
+    "--recreate",
+    "-r",
     is_flag=True,
-    help="Keep existing data (don't recreate index, reuse if exists)"
+    help="Recreate index (drop existing index and data)"
 )
-def main(schema, approach, test, docs, quiet, verbose, keep_data):
+def main(schema, approach, test, docs, quiet, verbose, recreate):
     """
     🚀 Redis RediSearch Performance Benchmark Tool
 
@@ -300,14 +300,19 @@ def main(schema, approach, test, docs, quiet, verbose, keep_data):
     runner = BenchmarkRunner(schema=schema_obj, schema_path=schema, n_docs=docs)
     
     try:
-        # Setup index
+        # Setup index (default: reuse existing, unless --recreate flag is set)
         if not quiet:
             with console.status("[bold green]Setting up index..."):
-                state = runner.setup_index(recreate=True)
-            console.print(f"✓ Index {state}", style="green")
+                state = runner.setup_index(recreate=recreate)
+            if state == "reused":
+                console.print(f"✓ Index {state} (data preserved)", style="green")
+            elif state == "recreated":
+                console.print(f"✓ Index {state} (data deleted)", style="yellow")
+            else:
+                console.print(f"✓ Index {state}", style="green")
             console.print()
         else:
-            runner.setup_index(recreate=True)
+            runner.setup_index(recreate=recreate)
         
         # Run benchmarks
         with Progress(

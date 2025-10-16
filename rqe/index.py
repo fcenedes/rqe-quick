@@ -92,11 +92,13 @@ def create_index_from_schema(r, schema, *, if_exists: str = "reuse") -> str:
             return None
 
     info = _info_dict()
+    was_recreated = False
 
     if info:
         if if_exists == "drop" or if_exists == "recreate":
             r.execute_command("FT.DROPINDEX", index_name, "DD")
             info = None
+            was_recreated = True
         elif if_exists == "reuse":
             return "reused"
 
@@ -200,7 +202,7 @@ def create_index_from_schema(r, schema, *, if_exists: str = "reuse") -> str:
         if result not in (b"OK", "OK"):
             raise RuntimeError(f"FT.CREATE failed: {result}")
 
-        return "created" if not info else "recreated"
+        return "recreated" if was_recreated else "created"
 
 
 def validate_index_schema(r, schema) -> Tuple[bool, List[str]]:
