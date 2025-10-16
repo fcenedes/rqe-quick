@@ -7,6 +7,7 @@ from .schema_based import (
     seed_from_schema_threaded,
     seed_from_schema_async,
     generate_document,
+    generate_all_documents,
 )
 
 __all__ = [
@@ -14,5 +15,6 @@ __all__ = [
     "seed_from_schema_threaded",
     "seed_from_schema_async",
     "generate_document",
+    "generate_all_documents",
 ]
 

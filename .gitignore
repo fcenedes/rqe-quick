@@ -44,4 +44,5 @@ htmlcov/
 
 # Logs
 *.log
-
+*.cast
+*.gif

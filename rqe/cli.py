@@ -238,8 +238,8 @@ def display_results(results, baseline_approach="naive", n_docs=None):
     "--docs",
     "-n",
     type=int,
-    default=500_000,
-    help="Number of documents to seed (default: 500,000)"
+    default=2_500_000,
+    help="Number of documents to seed (default: 2,500,000)"
 )
 @click.option(
     "--quiet",

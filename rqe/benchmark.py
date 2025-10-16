@@ -22,7 +22,8 @@ from .schema import load_schema, BenchmarkSchema
 from .seeding import (
     seed_from_schema_naive,
     seed_from_schema_threaded,
-    seed_from_schema_async
+    seed_from_schema_async,
+    generate_all_documents
 )
 from .aggregation import (
     count_by_fields_resp3_naive,
@@ -117,23 +118,32 @@ class BenchmarkRunner:
             BenchmarkResult
         """
         try:
+            # STEP 1: Generate all documents BEFORE timing starts (CPU-bound work)
+            if progress_callback:
+                progress_callback("Generating documents...")
+
+            docs = generate_all_documents(
+                self.schema,
+                n_docs=self.n_docs,
+                seed=Config.RANDOM_SEED
+            )
+
+            # STEP 2: Start timing HERE (only Redis I/O is timed)
             t0 = perf_counter()
 
             if approach == "naive":
                 seed_from_schema_naive(
                     self.redis_client,
                     schema=self.schema,
-                    n_docs=self.n_docs,
-                    chunk=Config.SEED_BATCH_SIZE,
-                    seed=Config.RANDOM_SEED
+                    docs=docs,
+                    chunk=Config.SEED_BATCH_SIZE
                 )
             elif approach == "threaded":
                 seed_from_schema_threaded(
                     self.redis_client,
                     schema=self.schema,
-                    n_docs=self.n_docs,
+                    docs=docs,
                     chunk=Config.SEED_BATCH_SIZE,
-                    seed=Config.RANDOM_SEED,
                     concurrency=Config.PARALLEL_WORKERS,
                     connection_pool=self.connection_pool
                 )
@@ -151,16 +161,15 @@ class BenchmarkRunner:
                     await seed_from_schema_async(
                         self.redis_client,
                         schema=self.schema,
-                        n_docs=self.n_docs,
+                        docs=docs,
                         chunk=Config.SEED_BATCH_SIZE,
-                        seed=Config.RANDOM_SEED,
                         concurrency=Config.PARALLEL_WORKERS
                     )
 
                 asyncio.run(run_async())
             else:
                 raise ValueError(f"Unknown approach: {approach}")
-            
+
             elapsed = perf_counter() - t0
             
             # Wait for indexing to complete
